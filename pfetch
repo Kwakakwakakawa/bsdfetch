@@ -306,44 +306,7 @@ get_memory() {
             done <<-EOF
 $(vmstat -s)
 EOF
-            mem_used=$(( (${act:-0} + ${wir:-0}) * page / 1024 / 1024))
-            ;;
-            # shellcheck disable=2046,2086
-            {
-                set -f
-                set +f -- $vmstat_header
-            }
-            fre_idx=0
-            idx=0
-            for f do
-                idx=$((idx + 1))
-                [ "$f" = "fre" ] && { fre_idx=$idx; break; }
-            done
-
-            # shellcheck disable=2046,2086
-            {
-                set -f
-                set +f -- $vmstat_data
-            }
-            idx=0
-            fre_val=
-            for f do
-                idx=$((idx + 1))
-                [ "$idx" -eq "$fre_idx" ] && { fre_val=$f; break; }
-            done
-
-            # Convert the scaled value ('384K', '4M', '1G' ...) to MiB.
-            fre_num=${fre_val%[A-Z]}
-            case $fre_val in
-                (*K) fre_mb=$((fre_num / 1024)) ;;
-                (*M) fre_mb=$fre_num ;;
-                (*G) fre_mb=$((fre_num * 1024)) ;;
-                (*T) fre_mb=$((fre_num * 1048576)) ;;
-                (*)  fre_mb=$((fre_num / 1048576)) ;;
-            esac
-
-            mem_used=$((mem_full - fre_mb))
-            [ "$mem_used" -lt 0 ] && mem_used=0
+            mem_used=$(( (${act:-0} + ${wir:-0}) * page / 1024 / 1024 ))
             ;;
 
         # Used memory is calculated using the following "formula":
@@ -351,9 +314,6 @@ EOF
         (FreeBSD* | DragonFly*)
             mem_full=$(($(sysctl -n hw.physmem) / 1024 / 1024))
 
-            # Use 'set --' to store the output of the command in the
-            # argument list. POSIX sh has no arrays but this is close
-            # enough.
             # shellcheck disable=2046
             {
                 set -f
@@ -384,8 +344,7 @@ EOF
                                  page / 1024 / 1024)))
                     ;;
                 (*)
-                    # Fallback: NetBSD implements part of the Linux
-                    # '/proc' filesystem when procfs(5) is mounted.
+                    # Fallback: NetBSD procfs (if mounted).
                     while IFS=':k ' read -r key val _; do
                         case $key in
                             (MemFree)
@@ -403,25 +362,41 @@ EOF
     log memory "${mem_used:-?}M / ${mem_full:-?}M" >&6
 }
 
+# Convert a size in KiB to a human readable string with one
+# decimal place, using pure integer math only.
+human() {
+    v=${1:-0}
+    if [ "$v" -ge 1073741824 ]; then
+        printf '%d.%dT' $((v / 1073741824)) $((v % 1073741824 * 10 / 1073741824))
+    elif [ "$v" -ge 1048576 ]; then
+        printf '%d.%dG' $((v / 1048576)) $((v % 1048576 * 10 / 1048576))
+    elif [ "$v" -ge 1024 ]; then
+        printf '%d.%dM' $((v / 1024)) $((v % 1024 * 10 / 1024))
+    else
+        printf '%dK' "$v"
+    fi
+}
+
 get_disk() {
-    # Report the size of every real (device backed) filesystem.
-    # OpenBSD for example splits /, /tmp, /var, /usr and /home into
-    # their own partitions - each one gets its own line here.
+    # OpenBSD's df(1) refuses '-h' together with '-P'
+    # ("df: -h and -i are incompatible with -P"), so we use the
+    # POSIX-guaranteed 'df -Pk' (1024-byte blocks, one line per
+    # filesystem) and humanize the numbers ourselves.
     #
-    # 'df -hP' output format (POSIX -P keeps it one line per fs):
-    # Filesystem  Size  Used Avail Capacity  Mounted-on
-    # /dev/wd0a   1.5G  1.2G  200M    86%    /
+    # Report every real (device backed) filesystem: OpenBSD splits
+    # /, /tmp, /var, /usr, /home, ... into separate partitions and
+    # each one gets its own line here.
     while read -r fs size used avail cap mnt; do
         # Skip the header and all pseudo filesystems (kernfs,
-        # procfs, fdesc, tmpfs, ...): only real devices count.
+        # procfs, fdesc, ...): only real devices count.
         case $fs in
             (/dev/*) ;;
             (*) continue ;;
         esac
 
-        log disk "$mnt  $used / $size ($cap)" >&6
+        log disk "$mnt  $(human "$used") / $(human "$size") ($cap)" >&6
     done <<-EOF
-$(df -hP 2>/dev/null)
+$(df -Pk 2>/dev/null)
 EOF
 }
 
