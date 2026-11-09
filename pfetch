@@ -207,10 +207,7 @@ get_host() {
     # unwanted and OEM information from the string as a whole.
     for word do
         case $word in
-            (To      | [Bb]e      | [Ff]illed | [Bb]y  | O.E.M.  | OEM  |\
-             Not     | Applicable | Specified | System | Product | Name |\
-             Version | Undefined  | Default   | string | INVALID |     |\
-             Type1ProductConfigId | OpenBSD)
+            (To|[Bb]e|[Ff]illed|[Bb]y|O.E.M.|OEM|Not|Applicable|Specified|System|Product|Name|Version|Undefined|Default|string|INVALID|Type1ProductConfigId|OpenBSD)
                 continue
                 ;;
         esac
