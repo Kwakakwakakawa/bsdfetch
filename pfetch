@@ -285,22 +285,29 @@ get_memory() {
     case $os in
         (OpenBSD*)
             mem_full=$(($(sysctl -n hw.physmem) / 1024 / 1024))
+            page=$(sysctl -n hw.pagesize)
 
-            # BUGFIX (was: 3rd field of 'vmstat' == 'avm', i.e. active
-            # *virtual* memory, which can exceed physical RAM).
+            # BUGFIX v2: 'used' must match what btop/top report, i.e.
+            # real process+kernel memory = active + wired pages.
+            # 'inactive' pages are reclaimable file cache (they are
+            # "used" only while RAM is idle) and must NOT be counted.
             #
-            # Locate the 'fre' column (size of the free page list) by
-            # name in the vmstat header instead of by a hardcoded
-            # position, then compute:
-            #     mem_used = hw.physmem - fre
-            # which equals active + inactive + wired pages.
-            {
-                read -r _
-                read -r vmstat_header
-                read -r vmstat_data
-            } <<-EOF
-$(vmstat)
+            # 'vmstat -s' dumps the uvmexp structure in a human
+            # readable form, e.g.:
+            #    259569 pages active
+            #     36372 pages inactive
+            #      4201 pages wired
+            #    196608 pages free
+            while read -r num _ key; do
+                case $key in
+                    (active) act=$num ;;
+                    (wired)  wir=$num ;;
+                esac
+            done <<-EOF
+$(vmstat -s)
 EOF
+            mem_used=$(( (${act:-0} + ${wir:-0}) * page / 1024 / 1024))
+            ;;
             # shellcheck disable=2046,2086
             {
                 set -f
